@@ -2,8 +2,6 @@
     <head>
         <meta charset="UTF-8" />
         <title>Multiplayer Experiment</title>
-        <!-- Dodaję bibliotekę jQuery -->
-        <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/2.1.3/jquery.min.js"></script>
         <!-- Dodaję bibliotekę gier Phaser -->
         <script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/2.4.2/phaser.min.js"></script>
         <!-- Dodaję bibliotekę sieciową Socket.io -->
@@ -32,7 +30,7 @@
             var WORLD_SIZE = {w:750,h:500};
           
             var water_tiles = [];
-            var bullet_array = [];
+            var ball_array = [];
           
             var socket; //Deklaracja w tym zakresie, inicjalizacja w funkcji "create"
             var other_players = {};
@@ -42,17 +40,17 @@
                 speed_x:0,// Prędkości gracza: horyzontalna oraz wertykalna
                 speed_y:0,
                 speed:0.5, // Parametr prędkości statku 
-                friction:0.95,
+                speed_decrease:0.95, // Parametr hamowania
                 shot:false,
                 update: function(){
                     // Obsługa spowolnionej rotacji w kierunku kursora
                     var dx = (game.input.mousePointer.x + game.camera.x) - this.sprite.x;
                     var dy = (game.input.mousePointer.y + game.camera.y) - this.sprite.y;
                     var angle = Math.atan2(dy,dx) - Math.PI/2;
-                    var dir = (angle - this.sprite.rotation) / (Math.PI * 2);
-                    dir -= Math.round(dir);
-                    dir = dir * Math.PI * 2;
-                    this.sprite.rotation += dir * 0.1;
+                    var direction = (angle - this.sprite.rotation) / (Math.PI * 2);
+                    direction -= Math.round(direction);
+                    direction = direction * Math.PI * 2;
+                    this.sprite.rotation += direction * 0.1;
                     // Ruch do przodu
                     if(game.input.keyboard.isDown(Phaser.Keyboard.W) || game.input.keyboard.isDown(Phaser.Keyboard.UP)){
                         this.speed_x += Math.cos(this.sprite.rotation + Math.PI/2) * this.speed;
@@ -61,22 +59,22 @@
                     
                     this.sprite.x += this.speed_x;
                     this.sprite.y += this.speed_y;
-                    this.speed_x *= this.friction;
-                    this.speed_y *= this.friction;
+                    this.speed_x *= this.speed_decrease;
+                    this.speed_y *= this.speed_decrease;
                     // Wystrzelenie pocisku 
                     if(game.input.activePointer.leftButton.isDown && !this.shot){
                         var speed_x = Math.cos(this.sprite.rotation + Math.PI/2) * 20;
                         var speed_y = Math.sin(this.sprite.rotation + Math.PI/2) * 20;
                         /* Serwer symuluje pociski, klient natomiast je generuje, dlatego nie potrzeba już tego kodu
-                        var bullet = {};
-                        bullet.speed_x = speed_x;
-                        bullet.speed_y = speed_y;
-                        bullet.sprite = game.add.sprite(this.sprite.x + bullet.speed_x,this.sprite.y + bullet.speed_y,'bullet');
-                        bullet_array.push(bullet); 
+                        var ball = {};
+                        ball.speed_x = speed_x;
+                        ball.speed_y = speed_y;
+                        ball.sprite = game.add.sprite(this.sprite.x + ball.speed_x,this.sprite.y + ball.speed_y,'ball');
+                        ball_array.push(ball); 
                         */
                         this.shot = true;
                         // Poinformowanie serwera, że wystrzelono pocisk 
-                        socket.emit('shoot-bullet',{x:this.sprite.x,y:this.sprite.y,angle:this.sprite.rotation,speed_x:speed_x,speed_y:speed_y})
+                        socket.emit('shoot-ball',{x:this.sprite.x,y:this.sprite.y,angle:this.sprite.rotation,speed_x:speed_x,speed_y:speed_y})
                     }
                     if(!game.input.activePointer.leftButton.isDown) this.shot = false;
                     // Obsługa zmiany przezroczystości gracza, gdy został trafiony
@@ -93,7 +91,7 @@
                     
                   
             };
-            function CreateShip(type,x,y,angle){
+            function CreateSprite(type,x,y,angle){
                 // type to liczba całkowita między 1 a 6
                 // zwraca stworzony statek w postaci obrazka 
                 var sprite = game.add.sprite(x,y,'ship' + String(type) + '_1');
@@ -112,7 +110,7 @@
                     game.load.image('ship'+String(i) +'_4', ASSET_URL + 'ship'+String(i)+'_4.png');
                 }
                 
-                game.load.image('bullet', ASSET_URL + 'cannon_ball.png');
+                game.load.image('ball', ASSET_URL + 'cannon_ball.png');
                 game.load.image('water', ASSET_URL + 'water_tile.png');
             }
             function create(){
@@ -144,7 +142,7 @@
                         // Jeśli nowy gracz nie został "stworzony"
                         if(other_players[id] == undefined && id != socket.id){ // Wyklucza obecnego gracza (by zapobiec nadtworzeniu)
                             var data = players_data[id];
-                            var p = CreateShip(data.type,data.x,data.y,data.angle);
+                            var p = CreateSprite(data.type,data.x,data.y,data.angle);
                             other_players[id] = p;
                             console.log("Created new player at (" + data.x + ", " + data.y + ")");
                         }
@@ -170,21 +168,21 @@
                 })
               
                 // Nasłuchiwanie zdarzeń pocisków 
-                socket.on('bullets-update',function(server_bullet_array){
+                socket.on('balls-update',function(server_ball_array){
                   // Jeśli klient nie ma odpowiedniej liczby pocisków - tworzy je
-                 for(var i=0;i<server_bullet_array.length;i++){
-                      if(bullet_array[i] == undefined){
-                          bullet_array[i] = game.add.sprite(server_bullet_array[i].x,server_bullet_array[i].y,'bullet');
+                 for(var i=0;i<server_ball_array.length;i++){
+                      if(ball_array[i] == undefined){
+                          ball_array[i] = game.add.sprite(server_ball_array[i].x,server_ball_array[i].y,'ball');
                       } else {
                           //W innym wypadku - aktualizuje
-                          bullet_array[i].x = server_bullet_array[i].x; 
-                          bullet_array[i].y = server_bullet_array[i].y;
+                          ball_array[i].x = server_ball_array[i].x; 
+                          ball_array[i].y = server_ball_array[i].y;
                       }
                   }
                   // Usuwa nadmiarowe pociski 
-                  for(var i=server_bullet_array.length;i<bullet_array.length;i++){
-                       bullet_array[i].destroy();
-                       bullet_array.splice(i,1);
+                  for(var i=server_ball_array.length;i<ball_array.length;i++){
+                       ball_array[i].destroy();
+                       ball_array.splice(i,1);
                        i--;
                    }
                   
@@ -227,21 +225,21 @@
                         p.y += (p.target_y - p.y) * 0.16;
                         // Przybliżenie kąta i wykluczenie problemu dodatnich/ujemnych liczb 
                         var angle = p.target_rotation;
-                        var dir = (angle - p.rotation) / (Math.PI * 2);
-                        dir -= Math.round(dir);
-                        dir = dir * Math.PI * 2;
-                        p.rotation += dir * 0.16;
+                        var direction = (angle - p.rotation) / (Math.PI * 2);
+                        direction -= Math.round(direction);
+                        direction = direction * Math.PI * 2;
+                        p.rotation += direction * 0.16;
                     }
                 }
                 /* Aktualizacja pocisków na serwerze, aby nie musiał tego robić klient 
-                for(var i=0;i<bullet_array.length;i++){
-                    var bullet = bullet_array[i];
-                    bullet.sprite.x += bullet.speed_x; 
-                    bullet.sprite.y += bullet.speed_y; 
+                for(var i=0;i<ball_array.length;i++){
+                    var ball = ball_array[i];
+                    ball.sprite.x += ball.speed_x; 
+                    ball.sprite.y += ball.speed_y; 
                     // Usuwanie przycisków spoza ekranu 
-                    if(bullet.sprite.x < -10 || bullet.sprite.x > WORLD_SIZE.w || bullet.sprite.y < -10 || bullet.sprite.y > WORLD_SIZE.h){
-                        bullet.sprite.destroy();
-                        bullet_array.splice(i,1);
+                    if(ball.sprite.x < -10 || ball.sprite.x > WORLD_SIZE.w || ball.sprite.y < -10 || ball.sprite.y > WORLD_SIZE.h){
+                        ball.sprite.destroy();
+                        ball_array.splice(i,1);
                         i--;
                     }
                 } 
